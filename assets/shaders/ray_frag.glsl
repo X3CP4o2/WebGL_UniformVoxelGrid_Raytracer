@@ -128,14 +128,14 @@ RaycastResult perfomRaycast(const vec3 rayOrigin, const vec3 rayDirection, const
    
    do {
 
-      if(sdSphere(currentPos, uLight)) {
-         distance = maxDistance;
-         materialInfo = MaterialInfo(
-            10u,
-            vec4(vec3(1., 1., 0.), 1.)
-         );
-         break;
-      }
+      // if(sdSphere(currentPos, uLight)) {
+      //    distance = maxDistance;
+      //    materialInfo = MaterialInfo(
+      //       10u,
+      //       vec4(vec3(1., 1., 0.), 1.)
+      //    );
+      //    break;
+      // }
 
       boxIntersectAdvanced(currentPos - currentBox, invDir, minBounds, maxBounds, tMax);
 
