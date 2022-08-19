@@ -1,7 +1,5 @@
 #version 300 es
 
-#define MAX_STEPS 300
-
 precision highp float;
 precision highp usampler3D;
 
@@ -12,8 +10,10 @@ uniform float voxelSize;
 uniform usampler3D uVoxelData;
 
 uniform vec3 uCamera;
+uniform vec3 uViewDir;
 uniform vec3 uLight; // TODO: Array
 uniform vec2 uResolution;
+uniform bool debugNormals;
 
 out vec4 oColor;
 
@@ -84,23 +84,21 @@ vec3 getBoxNormal(const vec3 point) {
    return normalize(direction);
 }
 
-// in our case point is localized and bounds 0 - 1
-bool boxIntersectAdvanced(const vec3 point, const vec3 invDir, const vec3 minB, const vec3 maxB, out float tmax) {
-   float t1 = (minB[0] - point[0]) * invDir[0];
-   float t2 = (maxB[0] - point[0]) * invDir[0];
 
-   float tmin = min(t1, t2);
-   tmax = max(t1, t2);
+bool boxIntersectAdvanced(const vec3 point, const vec3 invDir, const vec3 minB, const vec3 maxB, out float tOut) {
+    float tmin = 0.0, tmax = 100.;
 
-   for (int i = 1; i < 3; ++i) {
-      t1 = (minB[i] - point[i]) * invDir[i];
-      t2 = (maxB[i] - point[i]) * invDir[i];
+    for (int i = 0; i < 3; ++i) {
+        float t1 = (minB[i] - point[i]) * invDir[i];
+        float t2 = (maxB[i] - point[i]) * invDir[i];
 
-      tmin = max(tmin, min(min(t1, t2), tmax));
-      tmax = min(tmax, max(max(t1, t2), tmin));
-   }
+        tmin = min(max(t1, tmin), max(t2, tmin));
+        tmax = max(min(t1, tmax), min(t2, tmax));
+    }
 
-   return tmax >= max(tmin, 0.0);
+    tOut = max( max(tmin, 0.), tmax);
+
+    return tmin <= tmax;
 }
 
 bool sdSphere(const vec3 point, const vec3 light) {
@@ -120,24 +118,22 @@ RaycastResult perfomRaycast(const vec3 rayOrigin, const vec3 rayDirection, const
    // tMin would be entry, tMax exit
    // we always use tMax because the ray always originates inside a box ...
    float tMax;
-   int steps = 0;
 
    const vec3 minBounds = vec3(0.);
    vec3 maxBounds = vec3(voxelSize);
 
-   
    do {
 
-      // if(sdSphere(currentPos, uLight)) {
-      //    distance = maxDistance;
-      //    materialInfo = MaterialInfo(
-      //       10u,
-      //       vec4(vec3(1., 1., 0.), 1.)
-      //    );
-      //    break;
-      // }
+      if(sdSphere(currentPos, uLight)) {
+         distance = maxDistance;
+         materialInfo = MaterialInfo(
+            10u,
+            vec4(vec3(1., 1., 0.), 1.)
+         );
+         break;
+      }
 
-      boxIntersectAdvanced(currentPos - currentBox, invDir, minBounds, maxBounds, tMax);
+       boxIntersectAdvanced(currentPos - currentBox, invDir, minBounds, maxBounds, tMax);
 
       distance += tMax + 0.00001;
 
@@ -155,9 +151,7 @@ RaycastResult perfomRaycast(const vec3 rayOrigin, const vec3 rayDirection, const
 
       currentBox = nextBox;
       currentPos = nextPos;
-      steps++;
-
-   } while(steps < MAX_STEPS);
+   } while(distance < maxDistance);
 
    return RaycastResult(
       distance,
@@ -174,7 +168,7 @@ float getLight(const vec3 light,const RaycastResult ray) {
    float dif = clamp( dot(ray.normal, lightDir), 0., 1.);
 
    float maxDistance = length(lightVector);
-   float distance = perfomRaycast(ray.intersection + ray.normal * 0.001, lightDir, maxDistance).distance;
+   float distance = perfomRaycast(ray.intersection + ray.normal * 0.01, lightDir, maxDistance).distance;
 
    if(distance < maxDistance ) {
       dif *= .1;
@@ -184,34 +178,31 @@ float getLight(const vec3 light,const RaycastResult ray) {
 }
 
 vec3 debugNormalColor(const vec3 color) {
-   if(color.x < 0.) {
-      return vec3(1., 1., 0.);
-   }
-   if(color.y < 0.) {
-      return vec3(1., 0., 1.);
-   }
-   if(color.z < 0.) {
-      return vec3(0., 1., 1.);
-   }
-   return color;
+   return color * (sign(color) + .5);
 }
 
 void main(void) {
    vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
-
    vec3 rayOrigin = uCamera;
-   vec3 rayDirection = normalize(vec3(uv.x, uv.y, 1));
+   vec3 rayDirection = normalize(vec3(uv.x, uv.y, 1) * uViewDir);
 
-   RaycastResult boxRay = perfomRaycast(rayOrigin, rayDirection, worldBounds.x);
+   RaycastResult boxRay = perfomRaycast(rayOrigin, rayDirection, worldBounds.x * 3.);
 
-   if(boxRay.distance >= worldBounds.x) {
-      discard;
+   if(boxRay.materialInfo.number == 10u) {
+      oColor = boxRay.materialInfo.color;
+      return;
    }
 
-   // oColor = vec4(debugNormalColor(boxRay.normal), 1.);
+   if(boxRay.distance >= worldBounds.x) {
+      oColor = vec4(vec3(173., 216. ,230.) / 255., 1.);
+      return;
+   }
 
-   float diffuse = getLight(uLight, boxRay);
-   oColor = vec4( boxRay.materialInfo.color.xyz * diffuse, boxRay.materialInfo.color.w);
-
+   if(debugNormals) {
+      oColor = vec4(debugNormalColor(boxRay.normal), 1.);
+   } else {
+      float diffuse = getLight(uLight, boxRay);
+      oColor = vec4( boxRay.materialInfo.color.xyz * diffuse, boxRay.materialInfo.color.w);
+   }
    // oColor = vec4( boxRay.materialInfo.color.xyz, boxRay.materialInfo.color.w);
 }
